@@ -72,13 +72,28 @@ echo "dataset    : $DATASET   rollout: $INFER_BACKEND   smoke: $SMOKE"
 echo "console log: $LOG_FILE"
 echo "tensorboard: $TENSORBOARD_DIR"
 
-# ---- CUDA libcudart fix (sglang scheduler) ----------------------------
-# torch 2.9.1 bundles CUDA 12.8 libs but the system toolkit is 12.4. Without
-# this the sglang scheduler subprocess loads the wrong libcudart. Prepend
-# torch's cu12 libs to LD_LIBRARY_PATH and propagate them to Ray workers.
+# ---- env propagation to Ray workers -----------------------------------
+# Ray actors (incl. the one that downloads the model) run on a possibly
+# pre-existing cluster and only see env vars listed in runtime_env.env_vars
+# — they do NOT inherit this shell's `export`s. Forward both workarounds:
+#
+#  * CUDA libcudart: torch 2.9.1 bundles CUDA 12.8 libs but the system
+#    toolkit is 12.4. Without this the sglang scheduler subprocess loads the
+#    wrong libcudart. Prepend torch's cu12 libs to LD_LIBRARY_PATH.
+#  * HF Xet: without HF_HUB_DISABLE_XET the actor doing the Qwen3-8B pull
+#    uses the Xet CAS protocol and hangs on an unreachable CAS server
+#    (README "Known issues" #1). HF_ENDPOINT keeps it on the BD mirror.
 TORCH_CUDA_LIBS=$(python3 -c "import os,glob,nvidia; b=os.path.dirname(nvidia.__file__); print(':'.join(sorted(d for d in glob.glob(b+'/*/lib') if 'cu13' not in d)))")
 export LD_LIBRARY_PATH="${TORCH_CUDA_LIBS}:${LD_LIBRARY_PATH:-}"
-RAY_ARGS=("+ray_kwargs.ray_init.runtime_env.env_vars.LD_LIBRARY_PATH=${LD_LIBRARY_PATH}")
+# HF_HUB_DISABLE_XET is quoted ('1') so Hydra keeps it a string — Ray's
+# runtime_env.env_vars rejects non-string values (an unquoted 1 is an int).
+RAY_ARGS=(
+  "+ray_kwargs.ray_init.runtime_env.env_vars.LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
+  "+ray_kwargs.ray_init.runtime_env.env_vars.HF_HUB_DISABLE_XET='1'"
+)
+if [ -n "${HF_ENDPOINT:-}" ]; then
+  RAY_ARGS+=("+ray_kwargs.ray_init.runtime_env.env_vars.HF_ENDPOINT=${HF_ENDPOINT}")
+fi
 
 # ---- launch ------------------------------------------------------------
 # Later Hydra args win, so these override the canonical script's defaults.
