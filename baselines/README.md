@@ -66,6 +66,13 @@ launcher scripts handle the items below — this section is the *why*.
   and `/` has only ~270 GB free. Keep `trainer.max_actor_ckpt_to_keep` small and
   use `save_freq=-1` for smoke tests. The launcher sets
   `max_actor_ckpt_to_keep=1` (one ~80 GB checkpoint retained at a time).
+- **Colocated OOM at the first training step.** With FSDP offload *off*, the
+  actor holds ~65 GB/GPU once Adam optimizer state materializes on the first
+  `optimizer.step()`. The colocated sglang server then cannot resume its
+  KV-cache memory and `cu_mem_create` fails (OOM) on step 2 — step 0/1 pass,
+  step 2 dies. Fix: run with `actor.fsdp_config.param_offload=True` and
+  `optimizer_offload=True`; `run_qwen3_8b_grpo.sh` sets both by default. The
+  throughput cost was negligible in the smoke test (~253 s/step).
 
 ## 3. Phase 1 baseline — Qwen3-8B GRPO on GSM8K
 
@@ -81,7 +88,7 @@ the parallelism to the scale; don't over-engineer.
 | Component | Setting | Rationale |
 | --- | --- | --- |
 | Train backend | FSDP, full-shard over 8 GPUs | 8B params shard cleanly; ~2 GB params/GPU, optimizer fits without offload |
-| Param/optim offload | **off** | H100-80GB has headroom at this size; offload only costs throughput |
+| Param/optim offload | **on** (param + optimizer) | offload-off OOMs at the colocated sglang resume after step 1 (see §2 "Known issues"); CPU↔GPU cost measured negligible here |
 | Rollout engine | sglang, `tensor_model_parallel_size=2` | 2-way TP → 4 data-parallel rollout replicas across 8 GPUs |
 | Placement | colocated (actor + rollout share GPUs) | `gpu_memory_utilization=0.6` reserves 60% HBM for the KV cache, rest for FSDP state + activations |
 | Sequence parallel | `sp_size=1` | not needed at 1k prompt + 2k response lengths |

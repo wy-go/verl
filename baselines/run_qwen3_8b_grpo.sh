@@ -101,9 +101,17 @@ fi
 
 # ---- launch ------------------------------------------------------------
 # Later Hydra args win, so these override the canonical script's defaults.
+#
+# FSDP param+optimizer offload is ON. With offload off (the canonical
+# default) the actor holds ~65 GB/GPU after the first optimizer step, so the
+# colocated sglang server cannot resume its KV-cache memory -> OOM at step 2
+# (see README "Known issues"). Offloading to CPU frees the GPU between
+# phases; measured throughput cost was negligible (~253 s/step smoke test).
 bash examples/grpo_trainer/run_qwen3_8b_fsdp.sh \
   trainer.logger='["console","tensorboard"]' \
   trainer.max_actor_ckpt_to_keep=1 \
+  actor_rollout_ref.actor.fsdp_config.param_offload=True \
+  actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
   "${DATA_ARGS[@]}" \
   "${RAY_ARGS[@]}" \
   "$@" 2>&1 | tee "$LOG_FILE"
