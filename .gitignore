@@ -131,3 +131,7 @@ logs
 log
 outputs
 .history
+
+# baselines run logs (setup_env.out, smoke.out, *.crash-*, etc.)
+baselines/*.out
+baselines/*.out.*
