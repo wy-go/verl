@@ -10,6 +10,7 @@ phases scale up the model and GPU count.
 
 - Plan & how-to: this file
 - Per-run results log: [`RESULTS.md`](RESULTS.md)
+- One-time environment setup: [`setup_env.sh`](setup_env.sh)
 - Data prep: [`prepare_data.sh`](prepare_data.sh)
 - Phase-1 launcher: [`run_qwen3_8b_grpo.sh`](run_qwen3_8b_grpo.sh)
 
@@ -21,29 +22,50 @@ phases scale up the model and GPU count.
 | --- | --- |
 | GPUs | 8 × NVIDIA H100 80GB HBM3 (single node) |
 | CPU / RAM | 23 cores / ~1.8 TB |
-| Disk (`/`) | ~305 GB free |
-| Driver / CUDA | 535.129 / runtime 12.4 |
-| torch | 2.8.0+cu128 |
-| rollout engines | sglang 0.5.2rc2 ✅ &nbsp;·&nbsp; vLLM 0.8.5 ❌ (see below) |
-| train backends | FSDP ✅ &nbsp;·&nbsp; Megatron ✅ &nbsp;·&nbsp; flash-attn 2.8.3 |
+| Disk (`/`) | ~270 GB free |
+| Driver / CUDA | 535.129 · system toolkit 12.4 · torch bundles CUDA 12.8 |
+| torch | 2.9.1+cu128 |
+| rollout engines | sglang 0.5.8 ✅ &nbsp;·&nbsp; vLLM 0.8.5 ❌ (see below) |
+| train backends | FSDP ✅ &nbsp;·&nbsp; Megatron ✅ &nbsp;·&nbsp; flash-attn 2.8.3 (rebuilt from source) |
 | verl | editable install at `/opt/tiger/rl/verl` |
+
+> The stock image ships an older, broken stack (torch 2.8.0 + sglang 0.5.2rc2).
+> [`setup_env.sh`](setup_env.sh) brings it to the versions above — run it once on
+> a fresh box. The table and the rest of this file reflect the post-setup state.
 
 ## 2. Known issues / gotchas
 
-- **vLLM is broken on this box.** `import vllm` fails with
+The stock image does **not** work out of the box. `setup_env.sh` and the
+launcher scripts handle the items below — this section is the *why*.
+
+- **HF Xet downloads hang.** The Hugging Face Xet protocol bypasses
+  `HF_ENDPOINT` (the Bytedance mirror) and stalls on unreachable CAS servers.
+  `HF_HUB_DISABLE_XET=1` forces classic LFS through the mirror — `prepare_data.sh`
+  and `run_qwen3_8b_grpo.sh` export it; pass it for manual `huggingface-cli` pulls.
+- **vLLM is broken.** `import vllm` fails with
   `ImportError: undefined symbol: _ZN5torch3jit17parseSchemaOrNameERKSsb` —
-  vLLM 0.8.5's prebuilt extension was compiled against an older torch and
-  mismatches torch 2.8.0. **Use `INFER_BACKEND=sglang`** for all rollouts.
-  To restore vLLM later, install a build matching torch 2.8 (`vllm >= 0.10`).
+  vLLM 0.8.5's prebuilt extension does not match torch 2.9.1. **Use
+  `INFER_BACKEND=sglang`** for all rollouts. To restore vLLM, install a build
+  matching torch 2.9.
+- **flash-attn ABI mismatch.** The prebuilt flash-attn 2.8.3 wheel is built for
+  torch 2.8; against torch 2.9.1 it fails with `undefined symbol:
+  _ZNK3c106SymInt6sym_neERKS0_`. `setup_env.sh` rebuilds 2.8.3 from source
+  (~12 min) into user site-packages, which shadows the stale system copy.
+- **sglang scheduler libcudart mismatch.** torch 2.9.1 bundles CUDA 12.8 libs;
+  the system toolkit is 12.4. The sglang scheduler subprocess otherwise loads
+  the wrong `libcudart`. The launcher prepends torch's cu12 libs to
+  `LD_LIBRARY_PATH` and propagates them to Ray workers via `runtime_env`.
+- **wandb / protobuf clash.** sglang 0.5.8 pulls protobuf 6.x, which rejects the
+  byted-wandb fork's old generated `*_pb2.py`. `setup_env.sh` swaps it for stock
+  `wandb==0.26.1`. We log to **tensorboard** by default anyway (no auth needed);
+  `console` is always on.
 - **Low CPU count (23 cores for 8 GPUs).** Fine for GSM8K (cheap regex reward),
   but watch Ray dataloader / reward-worker warnings. Avoid CPU-heavy custom
   reward functions without bumping `data.dataloader_num_workers` carefully.
 - **Disk pressure.** One 8B FSDP checkpoint *with optimizer state* is ~80 GB,
-  and `/` has only ~290 GB free. Keep `trainer.max_actor_ckpt_to_keep` small and
+  and `/` has only ~270 GB free. Keep `trainer.max_actor_ckpt_to_keep` small and
   use `save_freq=-1` for smoke tests. The launcher sets
   `max_actor_ckpt_to_keep=1` (one ~80 GB checkpoint retained at a time).
-- **wandb 0.13.95 is old.** We default the logger to **tensorboard** (no auth
-  needed). `console` is always on. Switch to wandb explicitly if desired.
 
 ## 3. Phase 1 baseline — Qwen3-8B GRPO on GSM8K
 
@@ -94,16 +116,19 @@ against the verl baseline page** before declaring a reproduction:
 ## 4. How to run
 
 ```bash
-# 0. (optional) pre-download the model so step 0 isn't gated on a 16 GB pull
-huggingface-cli download Qwen/Qwen3-8B
+# 0. one-time on a fresh box: bring the env to the known-good versions (~15 min)
+bash baselines/setup_env.sh
 
-# 1. preprocess data → ~/data/gsm8k/{train,test}.parquet  (GSM8K only by default)
+# 1. (optional) pre-download the model so the first run isn't gated on a 16 GB pull
+HF_HUB_DISABLE_XET=1 huggingface-cli download Qwen/Qwen3-8B
+
+# 2. preprocess data → ~/data/gsm8k/{train,test}.parquet  (GSM8K only by default)
 bash baselines/prepare_data.sh
 
-# 2a. smoke test first — 1 epoch, no checkpoints, validates the whole pipeline
+# 3a. smoke test first — 1 epoch, no checkpoints, validates the whole pipeline
 SMOKE=1 bash baselines/run_qwen3_8b_grpo.sh
 
-# 2b. full Phase-1 baseline (GSM8K only, matches verl reference log)
+# 3b. full Phase-1 baseline (GSM8K only, matches verl reference log)
 bash baselines/run_qwen3_8b_grpo.sh
 
 # variants

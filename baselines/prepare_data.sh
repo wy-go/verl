@@ -11,6 +11,9 @@ set -xeuo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# HF Xet downloads bypass HF_ENDPOINT and hang on this box; force classic LFS.
+export HF_HUB_DISABLE_XET=1
+
 DATASET="${DATASET:-gsm8k}"
 DATA_DIR="${DATA_DIR:-$HOME/data}"
 
