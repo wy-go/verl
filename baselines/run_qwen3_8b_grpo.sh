@@ -28,8 +28,10 @@ LOG_DIR="$REPO_ROOT/baselines/logs"
 mkdir -p "$LOG_DIR"
 
 # ---- dataset selection -------------------------------------------------
+# Build data.*_files explicitly for BOTH cases so DATA_DIR is always honored —
+# the canonical script otherwise hard-codes $HOME/data for the gsm8k+math path.
 # gsm8k     : GSM8K only — cleanest reproduction of the verl reference log
-# gsm8k_math: use the canonical script default (GSM8K + MATH)
+# gsm8k_math: GSM8K + MATH
 DATA_ARGS=()
 case "$DATASET" in
   gsm8k)
@@ -38,7 +40,12 @@ case "$DATASET" in
       data.val_files="['$DATA_DIR/gsm8k/test.parquet']"
     )
     ;;
-  gsm8k_math) ;;
+  gsm8k_math)
+    DATA_ARGS=(
+      data.train_files="['$DATA_DIR/gsm8k/train.parquet', '$DATA_DIR/math/train.parquet']"
+      data.val_files="['$DATA_DIR/gsm8k/test.parquet', '$DATA_DIR/math/test.parquet']"
+    )
+    ;;
   *) echo "DATASET must be gsm8k or gsm8k_math, got: $DATASET" >&2; exit 1 ;;
 esac
 
@@ -64,6 +71,6 @@ echo "tensorboard: $TENSORBOARD_DIR"
 # Later Hydra args win, so these override the canonical script's defaults.
 bash examples/grpo_trainer/run_qwen3_8b_fsdp.sh \
   trainer.logger='["console","tensorboard"]' \
-  trainer.max_actor_ckpt_to_keep=3 \
+  trainer.max_actor_ckpt_to_keep=1 \
   "${DATA_ARGS[@]}" \
   "$@" 2>&1 | tee "$LOG_FILE"

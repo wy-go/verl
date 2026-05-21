@@ -38,9 +38,10 @@ phases scale up the model and GPU count.
 - **Low CPU count (23 cores for 8 GPUs).** Fine for GSM8K (cheap regex reward),
   but watch Ray dataloader / reward-worker warnings. Avoid CPU-heavy custom
   reward functions without bumping `data.dataloader_num_workers` carefully.
-- **Disk pressure.** One 8B FSDP checkpoint *with optimizer state* is ~80 GB.
-  Keep `trainer.max_actor_ckpt_to_keep` small and use `save_freq=-1` for smoke
-  tests. The launcher sets `max_actor_ckpt_to_keep=3`.
+- **Disk pressure.** One 8B FSDP checkpoint *with optimizer state* is ~80 GB,
+  and `/` has only ~290 GB free. Keep `trainer.max_actor_ckpt_to_keep` small and
+  use `save_freq=-1` for smoke tests. The launcher sets
+  `max_actor_ckpt_to_keep=1` (one ~80 GB checkpoint retained at a time).
 - **wandb 0.13.95 is old.** We default the logger to **tensorboard** (no auth
   needed). `console` is always on. Switch to wandb explicitly if desired.
 
@@ -96,7 +97,7 @@ against the verl baseline page** before declaring a reproduction:
 # 0. (optional) pre-download the model so step 0 isn't gated on a 16 GB pull
 huggingface-cli download Qwen/Qwen3-8B
 
-# 1. preprocess datasets → ~/data/{gsm8k,math}/{train,test}.parquet
+# 1. preprocess data → ~/data/gsm8k/{train,test}.parquet  (GSM8K only by default)
 bash baselines/prepare_data.sh
 
 # 2a. smoke test first — 1 epoch, no checkpoints, validates the whole pipeline
@@ -106,8 +107,9 @@ SMOKE=1 bash baselines/run_qwen3_8b_grpo.sh
 bash baselines/run_qwen3_8b_grpo.sh
 
 # variants
-DATASET=gsm8k_math bash baselines/run_qwen3_8b_grpo.sh      # gsm8k + math
-INFER_BACKEND=vllm  bash baselines/run_qwen3_8b_grpo.sh     # only after vLLM is fixed
+DATASET=gsm8k_math bash baselines/prepare_data.sh          # prep gsm8k + MATH, then:
+DATASET=gsm8k_math bash baselines/run_qwen3_8b_grpo.sh     # train on gsm8k + math
+INFER_BACKEND=vllm  bash baselines/run_qwen3_8b_grpo.sh    # only after vLLM is fixed
 ```
 
 Always run the **smoke test first** — it catches data-path, OOM, and backend
