@@ -75,7 +75,7 @@ echo "tensorboard: $TENSORBOARD_DIR"
 # ---- env propagation to Ray workers -----------------------------------
 # Ray actors (incl. the one that downloads the model) run on a possibly
 # pre-existing cluster and only see env vars listed in runtime_env.env_vars
-# — they do NOT inherit this shell's `export`s. Forward both workarounds:
+# — they do NOT inherit this shell's `export`s. Forward what they need:
 #
 #  * CUDA libcudart: torch 2.9.1 bundles CUDA 12.8 libs but the system
 #    toolkit is 12.4. Without this the sglang scheduler subprocess loads the
@@ -83,6 +83,9 @@ echo "tensorboard: $TENSORBOARD_DIR"
 #  * HF Xet: without HF_HUB_DISABLE_XET the actor doing the Qwen3-8B pull
 #    uses the Xet CAS protocol and hangs on an unreachable CAS server
 #    (README "Known issues" #1). HF_ENDPOINT keeps it on the BD mirror.
+#  * TENSORBOARD_DIR: verl's Tracking() runs in the actor and reads this
+#    from os.environ; without it the actor falls back to a relative path
+#    and os.makedirs fails with PermissionError in the actor's CWD.
 TORCH_CUDA_LIBS=$(python3 -c "import os,glob,nvidia; b=os.path.dirname(nvidia.__file__); print(':'.join(sorted(d for d in glob.glob(b+'/*/lib') if 'cu13' not in d)))")
 export LD_LIBRARY_PATH="${TORCH_CUDA_LIBS}:${LD_LIBRARY_PATH:-}"
 # HF_HUB_DISABLE_XET is quoted ('1') so Hydra keeps it a string — Ray's
@@ -90,6 +93,7 @@ export LD_LIBRARY_PATH="${TORCH_CUDA_LIBS}:${LD_LIBRARY_PATH:-}"
 RAY_ARGS=(
   "+ray_kwargs.ray_init.runtime_env.env_vars.LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
   "+ray_kwargs.ray_init.runtime_env.env_vars.HF_HUB_DISABLE_XET='1'"
+  "+ray_kwargs.ray_init.runtime_env.env_vars.TENSORBOARD_DIR=${TENSORBOARD_DIR}"
 )
 if [ -n "${HF_ENDPOINT:-}" ]; then
   RAY_ARGS+=("+ray_kwargs.ray_init.runtime_env.env_vars.HF_ENDPOINT=${HF_ENDPOINT}")
