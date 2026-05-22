@@ -38,6 +38,11 @@ pip install \
 PROTOBUF_VERSION=$(python3 -c 'import google.protobuf as p; print(p.__version__)')
 pip uninstall -y wandb byted-wandb || true
 pip install 'byted-wandb==0.13.95'
+# byteddatabus (a byted-wandb dep) is often pre-baked into the read-only system
+# site-packages; the protobuf-6 patch must rewrite its proto stub, so install a
+# copy into the writable user site (it shadows the system one on sys.path).
+# --ignore-installed skips uninstalling the read-only system copy.
+pip install --user --no-deps --ignore-installed byteddatabus
 pip install "protobuf==${PROTOBUF_VERSION}"
 python3 "$SCRIPT_DIR/patches/fix_bytedwandb_protobuf6.py"
 

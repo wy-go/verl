@@ -163,11 +163,19 @@ def patch_databus_stub() -> int:
 
 def main() -> int:
     print("Patching byted-wandb for protobuf 6.x compatibility ...")
-    print("[1/2] byteddatabus proto stub")
-    if patch_databus_stub() < 0:
+    try:
+        print("[1/2] byteddatabus proto stub")
+        if patch_databus_stub() < 0:
+            return 1
+        print("[2/2] wandb proto dispatchers")
+        patch_wandb_dispatchers()
+    except PermissionError as e:
+        print(f"\nERROR: cannot write {e.filename!r} — it is read-only")
+        print("(likely the system site-packages). Install a writable user-site")
+        print("copy of that package first, e.g. for byteddatabus:")
+        print("  pip install --user --no-deps --ignore-installed byteddatabus")
+        print("then re-run this script. (setup_env.sh already does this.)")
         return 1
-    print("[2/2] wandb proto dispatchers")
-    patch_wandb_dispatchers()
     print("Done. Verify with: python -c 'import wandb; print(wandb.__version__)'")
     return 0
 

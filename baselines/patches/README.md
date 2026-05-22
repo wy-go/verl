@@ -76,9 +76,11 @@ them, so it is safe to re-run.
 
 ## How it is applied
 
-`baselines/setup_env.sh` runs it automatically — after installing byted-wandb
-it restores protobuf to 6.x and invokes this script. To apply or re-apply
-manually:
+`baselines/setup_env.sh` runs it automatically — it installs byted-wandb,
+installs a writable user-site copy of `byteddatabus` (which is often pre-baked
+**read-only** into the system site-packages, where the patch could not rewrite
+its stub), restores protobuf to 6.x, and invokes this script. To apply or
+re-apply manually:
 
 ```bash
 python baselines/patches/fix_bytedwandb_protobuf6.py
