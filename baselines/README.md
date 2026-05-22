@@ -114,14 +114,16 @@ the parallelism to the scale; don't over-engineer.
 | `total_epochs` / `test_freq` / `save_freq` | 15 / 5 / 20 |
 
 GSM8K train set is 7,473 prompts → ~7 optimizer steps/epoch → ~105 steps for
-15 epochs. `gsm8k_math` (~15k prompts) is ~14 steps/epoch. Confirm wall-clock
-step time from the first few steps and record it in `RESULTS.md`.
+15 epochs. `gsm8k_math` (~15k prompts) is ~14 steps/epoch. Measured on this box:
+**~208 s/step**, ~6h05m for the full Phase-1 run (see `RESULTS.md`).
 
-### Expected outcome
+### Outcome — reproduced ✅
 
-Validation runs every `test_freq=5` steps. For an 8B-class model the GSM8K
-test score should climb into the low/mid-0.9s. **Verify the exact target
-against the verl baseline page** before declaring a reproduction:
+Validation runs every `test_freq=5` steps. Phase 1 reached **GSM8K acc@1 0.950**
+(peak 0.9515 at step 90) over the full 15-epoch / 105-step schedule — squarely in
+the expected mid-0.90s band for an 8B-class model, a clean reproduction of the
+verl GRPO reference. Full validation curve, timings, and config deltas are in
+[`RESULTS.md`](RESULTS.md). Reference:
 <https://verl.readthedocs.io/en/latest/algo/baseline.html>
 (reference GRPO training log linked from `examples/grpo_trainer/README.md`).
 
@@ -168,7 +170,7 @@ backend and parallel dims to match scale, not habit.
 
 | Model | Params (active) | Train backend | Parallelism | GPUs | Notes |
 | --- | --- | --- | --- | --- | --- |
-| **Qwen3-8B** dense | 8B | FSDP | full-shard; rollout TP=2 | 8×H100 | **Phase 1 (current)** |
+| **Qwen3-8B** dense | 8B | FSDP | full-shard; rollout TP=2 | 8×H100 | **Phase 1 ✅ done — val 0.950** |
 | Qwen3-30B-A3B MoE | 30B (3B) | Megatron (or FSDP) | expert parallelism for MoE layers; rollout TP=2–4 | 8–16×H100 | EP is the win for MoE |
 | Qwen2.5-32B dense | 32B | FSDP + offload, or Megatron TP=4 | TP=4; rollout TP=4–8 | 8–16×H100 | enable param/optim offload on FSDP |
 | ~70B dense | 70B | Megatron | TP=8 + PP=2 | 16–32×H100, multi-node | |
