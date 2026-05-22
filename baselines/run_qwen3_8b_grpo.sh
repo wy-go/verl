@@ -66,11 +66,16 @@ TS=$(date +%Y%m%d_%H%M%S)
 export EXPERIMENT_NAME=${EXPERIMENT_NAME:-qwen3_8b_grpo_${DATASET}_${INFER_BACKEND}_${TS}}
 export TENSORBOARD_DIR="$LOG_DIR/tb/$EXPERIMENT_NAME"
 LOG_FILE="$LOG_DIR/${EXPERIMENT_NAME}.log"
+# Checkpoints: verl's trainer.default_local_dir defaults to a RELATIVE path
+# ("checkpoints/..."), which the Ray worker resolves against its own CWD
+# (/usr/bin on this box) -> PermissionError on the first save. Pin it absolute.
+CKPT_DIR="$REPO_ROOT/baselines/checkpoints/$EXPERIMENT_NAME"
 
 echo "experiment : $EXPERIMENT_NAME"
 echo "dataset    : $DATASET   rollout: $INFER_BACKEND   smoke: $SMOKE"
 echo "console log: $LOG_FILE"
 echo "tensorboard: $TENSORBOARD_DIR"
+echo "checkpoints: $CKPT_DIR"
 
 # ---- env propagation to Ray workers -----------------------------------
 # Ray actors (incl. the one that downloads the model) run on a possibly
@@ -110,6 +115,7 @@ fi
 bash examples/grpo_trainer/run_qwen3_8b_fsdp.sh \
   trainer.logger='["console","tensorboard"]' \
   trainer.max_actor_ckpt_to_keep=1 \
+  trainer.default_local_dir="$CKPT_DIR" \
   actor_rollout_ref.actor.fsdp_config.param_offload=True \
   actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
   "${DATA_ARGS[@]}" \

@@ -73,6 +73,11 @@ launcher scripts handle the items below — this section is the *why*.
   step 2 dies. Fix: run with `actor.fsdp_config.param_offload=True` and
   `optimizer_offload=True`; `run_qwen3_8b_grpo.sh` sets both by default. The
   throughput cost was negligible in the smoke test (~253 s/step).
+- **Checkpoint save fails on a relative path.** verl's `trainer.default_local_dir`
+  defaults to a *relative* `checkpoints/...` path, which the Ray worker resolves
+  against its own CWD (`/usr/bin` here) → `PermissionError` on the first save.
+  `run_qwen3_8b_grpo.sh` pins it to an absolute `baselines/checkpoints/<exp>`.
+  Note `SMOKE=1` uses `save_freq=-1`, so the smoke test does not exercise this.
 
 ## 3. Phase 1 baseline — Qwen3-8B GRPO on GSM8K
 
