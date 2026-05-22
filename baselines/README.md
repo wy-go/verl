@@ -55,10 +55,14 @@ launcher scripts handle the items below — this section is the *why*.
   the system toolkit is 12.4. The sglang scheduler subprocess otherwise loads
   the wrong `libcudart`. The launcher prepends torch's cu12 libs to
   `LD_LIBRARY_PATH` and propagates them to Ray workers via `runtime_env`.
-- **wandb / protobuf clash.** sglang 0.5.8 pulls protobuf 6.x, which rejects the
-  byted-wandb fork's old generated `*_pb2.py`. `setup_env.sh` swaps it for stock
-  `wandb==0.26.1`. We log to **tensorboard** by default anyway (no auth needed);
-  `console` is always on.
+- **wandb / protobuf clash.** sglang 0.5.8 pulls protobuf 6.x, which the
+  byted-wandb fork (targets protobuf <5) does not support out of the box.
+  Rather than drop byted-wandb, `setup_env.sh` runs
+  `baselines/patches/fix_bytedwandb_protobuf6.py`, which rewrites the
+  byteddatabus + wandb proto stubs so `import wandb` works under protobuf 6
+  with **no downgrade**. Runs log to **wandb** (`console` always on); see
+  [`patches/README.md`](patches/README.md). Re-run the patch (or
+  `setup_env.sh`) after any reinstall of `wandb`/`byteddatabus`.
 - **Low CPU count (23 cores for 8 GPUs).** Fine for GSM8K (cheap regex reward),
   but watch Ray dataloader / reward-worker warnings. Avoid CPU-heavy custom
   reward functions without bumping `data.dataloader_num_workers` carefully.
@@ -147,7 +151,11 @@ bash baselines/run_qwen3_8b_grpo.sh
 DATASET=gsm8k_math bash baselines/prepare_data.sh          # prep gsm8k + MATH, then:
 DATASET=gsm8k_math bash baselines/run_qwen3_8b_grpo.sh     # train on gsm8k + math
 INFER_BACKEND=vllm  bash baselines/run_qwen3_8b_grpo.sh    # only after vLLM is fixed
+WANDB_MODE=online WANDB_API_KEY=<key> bash baselines/run_qwen3_8b_grpo.sh  # live wandb
 ```
+
+Runs log to **wandb** on this branch (offline by default — see §5). The
+byted-wandb protobuf-6 fix is in [`patches/`](patches/README.md).
 
 Always run the **smoke test first** — it catches data-path, OOM, and backend
 issues in ~7 steps instead of failing hours into a full run.
@@ -155,7 +163,10 @@ issues in ~7 steps instead of failing hours into a full run.
 ## 5. Monitoring
 
 - Console log: `baselines/logs/<experiment>.log` (tee'd by the launcher).
-- TensorBoard: `tensorboard --logdir baselines/logs/tb` then watch
+- wandb: `WANDB_MODE=offline` (default) writes `baselines/logs/wandb/` — push
+  to the ByteDance dashboard afterward with
+  `wandb sync baselines/logs/wandb/<run>`. `WANDB_MODE=online` (needs
+  `WANDB_API_KEY` exported) streams live. Watch:
   - validation reward (the reproduction target)
   - training reward mean (the reward curve)
   - response length, KL, entropy, actor grad norm (stability)

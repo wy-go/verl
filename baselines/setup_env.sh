@@ -11,6 +11,8 @@
 # See baselines/README.md "Known issues" for the reason behind each step.
 set -xeuo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # 1. torch first — flash-attn (step 4) compiles against the installed torch.
 pip install 'torch==2.9.1'
 
@@ -25,11 +27,19 @@ pip install \
   tensorboard \
   'torch==2.9.1'
 
-# 3. wandb: the byted-wandb fork (0.13.95) bundles protobuf-<4 *_pb2.py files
-#    that the protobuf 6.x runtime rejects -> swap it for stock wandb 0.26.1.
-#    (We log to tensorboard by default; this just keeps `import wandb` working.)
-pip uninstall -y byted-wandb || true
-pip install 'wandb==0.26.1'
+# 3. wandb: keep the byted-wandb fork so runs log to the ByteDance wandb
+#    dashboard. byted-wandb 0.13.x targets protobuf <5, so installing it
+#    transiently downgrades protobuf; capture the current (6.x) version first
+#    and restore it afterward -- sglang 0.5.8 / grpcio-tools require 6.x.
+#    fix_bytedwandb_protobuf6.py then rewrites the byteddatabus + wandb proto
+#    stubs so `import wandb` works under protobuf 6 with no downgrade.
+#    See baselines/patches/README.md. The pip "incompatible" warnings about
+#    the protobuf pins are cosmetic -- the patch is what makes it work.
+PROTOBUF_VERSION=$(python3 -c 'import google.protobuf as p; print(p.__version__)')
+pip uninstall -y wandb byted-wandb || true
+pip install 'byted-wandb==0.13.95'
+pip install "protobuf==${PROTOBUF_VERSION}"
+python3 "$SCRIPT_DIR/patches/fix_bytedwandb_protobuf6.py"
 
 # 4. flash-attn: the prebuilt 2.8.3 wheel is torch-2.8 ABI and fails against
 #    torch 2.9.1 (undefined symbol _ZNK3c106SymInt6sym_neERKS0_). Rebuild 2.8.3

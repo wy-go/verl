@@ -11,6 +11,8 @@
 #   SMOKE          1 = fast 1-epoch pipeline check, no checkpoints (default: 0)
 #   INFER_BACKEND  vllm | sglang | trtllm    (default: sglang)
 #   DATA_DIR       dataset root              (default: ~/data)
+#   WANDB_MODE     offline | online          (default: offline; online needs WANDB_API_KEY)
+#   WANDB_PROJECT  wandb project name        (default: verl-baselines)
 #   TOTAL_EPOCHS / SAVE_FREQ / TEST_FREQ / MODEL_PATH / EXPERIMENT_NAME ... pass through
 #
 # Auto-applies the HF-Xet and CUDA-libcudart workarounds (see README "Known issues").
@@ -64,17 +66,26 @@ fi
 # ---- naming & logging --------------------------------------------------
 TS=$(date +%Y%m%d_%H%M%S)
 export EXPERIMENT_NAME=${EXPERIMENT_NAME:-qwen3_8b_grpo_${DATASET}_${INFER_BACKEND}_${TS}}
-export TENSORBOARD_DIR="$LOG_DIR/tb/$EXPERIMENT_NAME"
+WANDB_PROJECT=${WANDB_PROJECT:-verl-baselines}
 LOG_FILE="$LOG_DIR/${EXPERIMENT_NAME}.log"
 # Checkpoints: verl's trainer.default_local_dir defaults to a RELATIVE path
 # ("checkpoints/..."), which the Ray worker resolves against its own CWD
 # (/usr/bin on this box) -> PermissionError on the first save. Pin it absolute.
 CKPT_DIR="$REPO_ROOT/baselines/checkpoints/$EXPERIMENT_NAME"
 
+# wandb: this branch logs to the byted-wandb fork (ByteDance wandb dashboard).
+# byted-wandb is protobuf-6-incompatible out of the box; setup_env.sh applies
+# baselines/patches/fix_bytedwandb_protobuf6.py to fix it. Logging mode:
+#   WANDB_MODE=offline (default) -> writes $WANDB_DIR; push later: `wandb sync`
+#   WANDB_MODE=online            -> streams live; needs WANDB_API_KEY exported
+export WANDB_MODE=${WANDB_MODE:-offline}
+export WANDB_DIR="$LOG_DIR/wandb"
+mkdir -p "$WANDB_DIR"
+
 echo "experiment : $EXPERIMENT_NAME"
 echo "dataset    : $DATASET   rollout: $INFER_BACKEND   smoke: $SMOKE"
 echo "console log: $LOG_FILE"
-echo "tensorboard: $TENSORBOARD_DIR"
+echo "wandb      : project=$WANDB_PROJECT  mode=$WANDB_MODE  dir=$WANDB_DIR"
 echo "checkpoints: $CKPT_DIR"
 
 # ---- env propagation to Ray workers -----------------------------------
@@ -88,9 +99,9 @@ echo "checkpoints: $CKPT_DIR"
 #  * HF Xet: without HF_HUB_DISABLE_XET the actor doing the Qwen3-8B pull
 #    uses the Xet CAS protocol and hangs on an unreachable CAS server
 #    (README "Known issues" #1). HF_ENDPOINT keeps it on the BD mirror.
-#  * TENSORBOARD_DIR: verl's Tracking() runs in the actor and reads this
-#    from os.environ; without it the actor falls back to a relative path
-#    and os.makedirs fails with PermissionError in the actor's CWD.
+#  * WANDB_*: verl's Tracking() runs in the actor, so the wandb backend
+#    reads WANDB_MODE / WANDB_DIR / WANDB_API_KEY from the actor's os.environ
+#    — they must be forwarded here or wandb logging misbehaves silently.
 TORCH_CUDA_LIBS=$(python3 -c "import os,glob,nvidia; b=os.path.dirname(nvidia.__file__); print(':'.join(sorted(d for d in glob.glob(b+'/*/lib') if 'cu13' not in d)))")
 export LD_LIBRARY_PATH="${TORCH_CUDA_LIBS}:${LD_LIBRARY_PATH:-}"
 # HF_HUB_DISABLE_XET is quoted ('1') so Hydra keeps it a string — Ray's
@@ -98,10 +109,19 @@ export LD_LIBRARY_PATH="${TORCH_CUDA_LIBS}:${LD_LIBRARY_PATH:-}"
 RAY_ARGS=(
   "+ray_kwargs.ray_init.runtime_env.env_vars.LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
   "+ray_kwargs.ray_init.runtime_env.env_vars.HF_HUB_DISABLE_XET='1'"
-  "+ray_kwargs.ray_init.runtime_env.env_vars.TENSORBOARD_DIR=${TENSORBOARD_DIR}"
+  "+ray_kwargs.ray_init.runtime_env.env_vars.WANDB_MODE=${WANDB_MODE}"
+  "+ray_kwargs.ray_init.runtime_env.env_vars.WANDB_DIR=${WANDB_DIR}"
 )
 if [ -n "${HF_ENDPOINT:-}" ]; then
   RAY_ARGS+=("+ray_kwargs.ray_init.runtime_env.env_vars.HF_ENDPOINT=${HF_ENDPOINT}")
+fi
+# Online wandb needs the API key (and optionally a custom host) in the actor;
+# forward each only when set so offline runs stay zero-config.
+if [ -n "${WANDB_API_KEY:-}" ]; then
+  RAY_ARGS+=("+ray_kwargs.ray_init.runtime_env.env_vars.WANDB_API_KEY=${WANDB_API_KEY}")
+fi
+if [ -n "${WANDB_BASE_URL:-}" ]; then
+  RAY_ARGS+=("+ray_kwargs.ray_init.runtime_env.env_vars.WANDB_BASE_URL=${WANDB_BASE_URL}")
 fi
 
 # ---- launch ------------------------------------------------------------
@@ -113,7 +133,9 @@ fi
 # (see README "Known issues"). Offloading to CPU frees the GPU between
 # phases; measured throughput cost was negligible (~253 s/step smoke test).
 bash examples/grpo_trainer/run_qwen3_8b_fsdp.sh \
-  trainer.logger='["console","tensorboard"]' \
+  trainer.logger='["console","wandb"]' \
+  trainer.project_name="$WANDB_PROJECT" \
+  trainer.experiment_name="$EXPERIMENT_NAME" \
   trainer.max_actor_ckpt_to_keep=1 \
   trainer.default_local_dir="$CKPT_DIR" \
   actor_rollout_ref.actor.fsdp_config.param_offload=True \
