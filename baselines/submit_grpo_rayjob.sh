@@ -36,6 +36,15 @@ case "$MODE" in
   *) echo "usage: $0 {smoke|full} [extra hydra args...]" >&2; exit 2 ;;
 esac
 
+# Live tracking: forward byted-wandb env into the entrypoint when set. byted-wandb
+# online streams LIVE and authenticates via the pod's ZTI identity (NO WANDB_API_KEY);
+# TK_HOST selects the region (auto-detected if unset). run_qwen3_8b_grpo.sh relays
+# WANDB_MODE/TK_HOST on to the Ray actors where verl's Tracking() runs.
+#   WANDB_MODE=online TK_HOST=https://<region-host> baselines/submit_grpo_rayjob.sh smoke
+for v in WANDB_MODE TK_HOST WANDB_PROJECT WANDB_NAME; do
+  [ -n "${!v:-}" ] && ENVS="${ENVS:+$ENVS }${v}=${!v}"
+done
+
 echo ">> ray job submit '${SID}' -> ${RAY_ADDRESS}  (driver pinned to a '${WORKER_RESOURCE}' node)"
 exec ray job submit \
   --address "${RAY_ADDRESS}" \

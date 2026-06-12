@@ -11,7 +11,9 @@
 #   SMOKE          1 = fast 1-epoch pipeline check, no checkpoints (default: 0)
 #   INFER_BACKEND  vllm | sglang | trtllm    (default: sglang)
 #   DATA_DIR       dataset root              (default: ~/data)
-#   WANDB_MODE     offline | online          (default: offline; online needs WANDB_API_KEY)
+#   WANDB_MODE     offline | online          (default: offline. byted-wandb online = live,
+#                                             auth via pod ZTI identity, region via TK_HOST — no API key)
+#   TK_HOST        byted-wandb region host    (optional; auto-detected from the pod env if unset)
 #   WANDB_PROJECT  wandb project name        (default: verl-baselines)
 #   TOTAL_EPOCHS / SAVE_FREQ / TEST_FREQ / MODEL_PATH / EXPERIMENT_NAME ... pass through
 #
@@ -77,7 +79,7 @@ CKPT_DIR="$REPO_ROOT/baselines/checkpoints/$EXPERIMENT_NAME"
 # byted-wandb is protobuf-6-incompatible out of the box; setup_env.sh applies
 # baselines/patches/fix_bytedwandb_protobuf6.py to fix it. Logging mode:
 #   WANDB_MODE=offline (default) -> writes $WANDB_DIR; push later: `wandb sync`
-#   WANDB_MODE=online            -> streams live; needs WANDB_API_KEY exported
+#   WANDB_MODE=online            -> byted-wandb streams LIVE (ZTI auth, region via TK_HOST)
 export WANDB_MODE=${WANDB_MODE:-offline}
 export WANDB_DIR="$LOG_DIR/wandb"
 mkdir -p "$WANDB_DIR"
@@ -122,6 +124,13 @@ if [ -n "${WANDB_API_KEY:-}" ]; then
 fi
 if [ -n "${WANDB_BASE_URL:-}" ]; then
   RAY_ARGS+=("+ray_kwargs.ray_init.runtime_env.env_vars.WANDB_BASE_URL=${WANDB_BASE_URL}")
+fi
+# byted-wandb (in-house wandb): with WANDB_MODE=online it streams LIVE to the region
+# host selected by TK_HOST (auto-detected from the pod env if unset), and authenticates
+# via the pod's ZTI identity — NO WANDB_API_KEY needed (that is the OSS path). Forward
+# TK_HOST to the actor where verl's Tracking() runs so it hits the right region.
+if [ -n "${TK_HOST:-}" ]; then
+  RAY_ARGS+=("+ray_kwargs.ray_init.runtime_env.env_vars.TK_HOST=${TK_HOST}")
 fi
 
 # ---- launch ------------------------------------------------------------
